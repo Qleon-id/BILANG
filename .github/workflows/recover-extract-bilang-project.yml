@@ -1,0 +1,101 @@
+name: Recover and Extract BILANG Project
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  recover-extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recover ZIP from previous commit if needed
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE="bilang-build31-foundation.zip"
+
+          if [ -f "$ZIP_FILE" ]; then
+            echo "ZIP found in current commit: $ZIP_FILE"
+          elif git cat-file -e "HEAD^:$ZIP_FILE" 2>/dev/null; then
+            echo "ZIP not in current commit."
+            echo "Recovering $ZIP_FILE from previous commit..."
+            git show "HEAD^:$ZIP_FILE" > "$ZIP_FILE"
+          else
+            echo "Could not find $ZIP_FILE in current or previous commit."
+            git log --all --name-only --pretty=format: | grep -E '\.zip$' | head -20 || true
+            exit 1
+          fi
+
+      - name: Extract Flutter project
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf _bilang_extract
+          mkdir -p _bilang_extract
+
+          unzip -o "bilang-build31-foundation.zip" -d _bilang_extract
+
+          shopt -s dotglob nullglob
+
+          # Find pubspec.yaml anywhere inside the extracted ZIP.
+          PUBSPEC=$(find _bilang_extract -type f -name "pubspec.yaml" -print -quit)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "pubspec.yaml was not found after extraction."
+            find _bilang_extract -maxdepth 3 -type f | head -100
+            exit 1
+          fi
+
+          SOURCE_DIR=$(dirname "$PUBSPEC")
+          echo "Flutter project found at: $SOURCE_DIR"
+
+          # Copy the actual Flutter project into repository root.
+          cp -a "$SOURCE_DIR"/. .
+
+          rm -rf _bilang_extract "bilang-build31-foundation.zip"
+
+      - name: Verify Flutter project files
+        shell: bash
+        run: |
+          set -e
+
+          test -f pubspec.yaml
+          test -d lib
+          test -d test
+
+          echo "BILANG project successfully extracted."
+          echo ""
+          echo "Root files:"
+          find . -maxdepth 2 -type f | sort | head -100
+
+      - name: Commit recovered project
+        shell: bash
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Recover and extract BILANG Flutter project"
+          git push
+          
