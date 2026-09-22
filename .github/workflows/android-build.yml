@@ -21,10 +21,16 @@ jobs:
           mkdir -p /tmp/bilang-project
           unzip -q bilang-project.zip -d /tmp/bilang-project
 
-      - name: Check Flutter project
+      - name: Locate Flutter project
         run: |
-          test -f /tmp/bilang-project/pubspec.yaml
-          test -d /tmp/bilang-project/lib
+          if [ -f "/tmp/bilang-project/pubspec.yaml" ]; then
+            echo "PROJECT_DIR=/tmp/bilang-project" >> "$GITHUB_ENV"
+          elif [ -f "/tmp/bilang-project/build41/pubspec.yaml" ]; then
+            echo "PROJECT_DIR=/tmp/bilang-project/build41" >> "$GITHUB_ENV"
+          else
+            echo "pubspec.yaml tidak ditemukan di ZIP."
+            exit 1
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -38,22 +44,28 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Create Android platform
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --platforms=android --project-name bilang .
+          fi
+
       - name: Flutter pub get
-        working-directory: /tmp/bilang-project
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
 
       - name: Flutter test
-        working-directory: /tmp/bilang-project
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter test
 
       - name: Build Android APK
-        working-directory: /tmp/bilang-project
+        working-directory: ${{ env.PROJECT_DIR }}
         run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: bilang-android-release
-          path: /tmp/bilang-project/build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          
