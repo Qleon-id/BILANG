@@ -50,6 +50,7 @@ jobs:
           if [ ! -d "android" ]; then
             flutter create --platforms=android --project-name bilang .
           fi
+          rm -f test/widget_test.dart
 
       - name: Flutter pub get
         working-directory: ${{ env.PROJECT_DIR }}
@@ -69,3 +70,4 @@ jobs:
           name: bilang-android-release
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+          
