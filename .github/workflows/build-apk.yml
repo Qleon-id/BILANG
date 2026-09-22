@@ -1,0 +1,62 @@
+name: Build BILANG APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find project ZIP
+        id: find_zip
+        shell: bash
+        run: |
+          ZIP=$(find . -maxdepth 1 -type f -name 'BILANG*.zip' -print | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "BILANG project ZIP not found in repository root."
+            exit 1
+          fi
+
+          echo "Using: $ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Extract project ZIP
+        run: |
+          rm -rf project
+          mkdir project
+          unzip -q "${{ steps.find_zip.outputs.zip }}" -d project
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Generate Android platform files
+        working-directory: project
+        run: flutter create --platforms=android .
+
+      - name: Get dependencies
+        working-directory: project
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: project
+        run: flutter analyze
+
+      - name: Build Android APK
+        working-directory: project
+        run: flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilang-debug-apk
+          path: project/build/app/outputs/flutter-apk/app-debug.apk
