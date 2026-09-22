@@ -6,7 +6,7 @@ on:
     paths:
       - "bilang-project.zip"
       - ".github/workflows/android-build.yml"
-      
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
@@ -60,80 +60,41 @@ jobs:
           APP_GRADLE_KTS="android/app/build.gradle.kts"
 
           if [ -f "$APP_GRADLE" ]; then
-            python3 - <<'PY'
-from pathlib import Path
-p = Path("android/app/build.gradle")
-s = p.read_text()
+            if ! grep -q "coreLibraryDesugaringEnabled" "$APP_GRADLE"; then
+              if grep -q "compileOptions {" "$APP_GRADLE"; then
+                sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$APP_GRADLE"
+              else
+                sed -i '/android {/a\    compileOptions {\n        coreLibraryDesugaringEnabled true\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }' "$APP_GRADLE"
+              fi
+            fi
 
-if "coreLibraryDesugaringEnabled" not in s:
-    marker = "    compileOptions {"
-    block = '''    compileOptions {\n        coreLibraryDesugaringEnabled true\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }'''
-    if marker in s:
-        start = s.index(marker)
-        depth = 0
-        end = None
-        for i in range(start, len(s)):
-            if s[i] == '{':
-                depth += 1
-            elif s[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        if end:
-            s = s[:start] + block + s[end:]
-    else:
-        s = s.replace("android {", "android {\n" + block, 1)
+            if ! grep -q "desugar_jdk_libs" "$APP_GRADLE"; then
+              printf '\n\ndependencies {\n    coreLibraryDesugaring '\''com.android.tools:desugar_jdk_libs:2.1.4'\''\n}\n' >> "$APP_GRADLE"
+            fi
 
-if "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'" not in s:
-    if "dependencies {" in s:
-        s = s.replace("dependencies {", "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'", 1)
-    else:
-        s += "\n\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
-
-p.write_text(s)
-PY
           elif [ -f "$APP_GRADLE_KTS" ]; then
-            python3 - <<'PY'
-from pathlib import Path
-p = Path("android/app/build.gradle.kts")
-s = p.read_text()
+            if ! grep -q "isCoreLibraryDesugaringEnabled" "$APP_GRADLE_KTS"; then
+              if grep -q "compileOptions {" "$APP_GRADLE_KTS"; then
+                sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$APP_GRADLE_KTS"
+              else
+                sed -i '/android {/a\    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }' "$APP_GRADLE_KTS"
+              fi
+            fi
 
-if "isCoreLibraryDesugaringEnabled" not in s:
-    marker = "    compileOptions {"
-    block = '''    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }'''
-    if marker in s:
-        start = s.index(marker)
-        depth = 0
-        end = None
-        for i in range(start, len(s)):
-            if s[i] == '{':
-                depth += 1
-            elif s[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        if end:
-            s = s[:start] + block + s[end:]
-    else:
-        s = s.replace("android {", "android {\n" + block, 1)
-
-if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in s:
-    if "dependencies {" in s:
-        s = s.replace("dependencies {", 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")', 1)
-    else:
-        s += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
-
-p.write_text(s)
-PY
+            if ! grep -q "desugar_jdk_libs" "$APP_GRADLE_KTS"; then
+              printf '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> "$APP_GRADLE_KTS"
+            fi
           else
             echo "android/app/build.gradle(.kts) tidak ditemukan."
             exit 1
           fi
 
           echo "=== Android app Gradle config ==="
-          if [ -f "$APP_GRADLE" ]; then cat "$APP_GRADLE"; else cat "$APP_GRADLE_KTS"; fi
+          if [ -f "$APP_GRADLE" ]; then
+            cat "$APP_GRADLE"
+          else
+            cat "$APP_GRADLE_KTS"
+          fi
 
       - name: Flutter pub get
         working-directory: ${{ env.PROJECT_DIR }}
@@ -153,3 +114,4 @@ PY
           name: bilang-android-release
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+          
