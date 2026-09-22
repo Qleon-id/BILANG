@@ -2,7 +2,11 @@ name: Build BILANG Android APK
 
 on:
   workflow_dispatch:
-
+  push:
+    paths:
+      - "bilang-project.zip"
+      - ".github/workflows/android-build.yml"
+      
 jobs:
   build-android:
     runs-on: ubuntu-latest
