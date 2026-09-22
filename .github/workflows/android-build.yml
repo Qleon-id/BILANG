@@ -1,0 +1,59 @@
+name: Build BILANG Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "bilang-project.zip"
+      - ".github/workflows/android-build.yml"
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract project temporarily
+        run: |
+          rm -rf /tmp/bilang-project
+          mkdir -p /tmp/bilang-project
+          unzip -q bilang-project.zip -d /tmp/bilang-project
+
+      - name: Check Flutter project
+        run: |
+          test -f /tmp/bilang-project/pubspec.yaml
+          test -d /tmp/bilang-project/lib
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: /tmp/bilang-project
+        run: flutter pub get
+
+      - name: Flutter test
+        working-directory: /tmp/bilang-project
+        run: flutter test
+
+      - name: Build Android APK
+        working-directory: /tmp/bilang-project
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilang-android-release
+          path: /tmp/bilang-project/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          
