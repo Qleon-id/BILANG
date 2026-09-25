@@ -43,11 +43,49 @@ jobs:
         working-directory: project
         run: flutter create --platforms=android .
 
+      - name: Configure Android speech recognition
+        working-directory: project
+        shell: bash
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+
+          permissions = [
+              '    <uses-permission android:name="android.permission.RECORD_AUDIO"/>',
+              '    <uses-permission android:name="android.permission.INTERNET"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>',
+          ]
+
+          for line in permissions:
+              if line not in s:
+                  s = s.replace('<application', line + '\n\n    <application', 1)
+
+          queries = '''    <queries>\n        <intent>\n            <action android:name="android.speech.RecognitionService" />\n        </intent>\n    </queries>\n\n'''
+          if 'android.speech.RecognitionService' not in s:
+              s = s.replace('<application', queries + '    <application', 1)
+
+          p.write_text(s)
+          PY
+
+          echo "=== AndroidManifest speech configuration ==="
+          cat "$MANIFEST"
+
+      - name: Generate BILANG Android launcher icon
+        working-directory: project
+        run: dart run flutter_launcher_icons
+
       - name: Get dependencies
         working-directory: project
         run: flutter pub get
 
-      - name: Analyze
+      - name: Analyze BILANG source
         working-directory: project
         run: flutter analyze lib
 
@@ -60,3 +98,4 @@ jobs:
         with:
           name: bilang-debug-apk
           path: project/build/app/outputs/flutter-apk/app-debug.apk
+          
