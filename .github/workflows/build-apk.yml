@@ -14,18 +14,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find project ZIP
+      - name: Find latest BILANG project ZIP
         id: find_zip
         shell: bash
         run: |
-          ZIP=$(find . -maxdepth 1 -type f -name 'BILANG*.zip' -print | head -n 1)
+          ZIP=$(find . -maxdepth 1 -type f -name 'BILANG*.zip' -print | sort -V | tail -n 1)
 
           if [ -z "$ZIP" ]; then
             echo "BILANG project ZIP not found in repository root."
             exit 1
           fi
 
-          echo "Using: $ZIP"
+          echo "Using latest ZIP: $ZIP"
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
       - name: Extract project ZIP
@@ -33,6 +33,15 @@ jobs:
           rm -rf project
           mkdir project
           unzip -q "${{ steps.find_zip.outputs.zip }}" -d project
+
+          if [ ! -f project/pubspec.yaml ]; then
+            echo "ERROR: pubspec.yaml not found at project root."
+            echo "ZIP structure:"
+            find project -maxdepth 2 -type f | sort | head -100
+            exit 1
+          fi
+
+          echo "BILANG project detected successfully."
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -47,8 +56,6 @@ jobs:
         working-directory: project
         shell: bash
         run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-
           python3 - <<'PY'
           from pathlib import Path
 
@@ -65,25 +72,152 @@ jobs:
 
           for line in permissions:
               if line not in s:
-                  s = s.replace('<application', line + '\n\n    <application', 1)
+                  s = s.replace(
+                      '<application',
+                      line + '\n\n    <application',
+                      1
+                  )
 
-          queries = '''    <queries>\n        <intent>\n            <action android:name="android.speech.RecognitionService" />\n        </intent>\n    </queries>\n\n'''
+          queries = '''    <queries>
+              <intent>
+                  <action android:name="android.speech.RecognitionService" />
+              </intent>
+          </queries>
+
+          '''
+
           if 'android.speech.RecognitionService' not in s:
-              s = s.replace('<application', queries + '    <application', 1)
+              s = s.replace(
+                  '<application',
+                  queries + '    <application',
+                  1
+              )
 
           p.write_text(s)
           PY
 
-          echo "=== AndroidManifest speech configuration ==="
-          cat "$MANIFEST"
+          echo "Speech recognition configuration applied."
 
-      - name: Generate BILANG Android launcher icon
+      - name: Configure Android Gradle compatibility
         working-directory: project
-        run: dart run flutter_launcher_icons
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/gradle.properties")
+
+          if p.exists():
+              s = p.read_text()
+          else:
+              s = ""
+
+          flags = [
+              "android.newDsl=false",
+              "android.builtInKotlin=false",
+          ]
+
+          for flag in flags:
+              key = flag.split("=")[0]
+
+              if not any(line.startswith(key + "=") for line in s.splitlines()):
+                  if s and not s.endswith("\n"):
+                      s += "\n"
+                  s += flag + "\n"
+
+          p.write_text(s)
+          PY
+
+          echo "=== gradle.properties ==="
+          cat android/gradle.properties
+
+      - name: Configure core library desugaring
+        working-directory: project
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          candidates = [
+              Path("android/app/build.gradle.kts"),
+              Path("android/app/build.gradle"),
+          ]
+
+          build_file = next((p for p in candidates if p.exists()), None)
+
+          if build_file is None:
+              raise SystemExit("Android app Gradle file not found.")
+
+          s = build_file.read_text()
+
+          if build_file.suffix == ".kts":
+              if "isCoreLibraryDesugaringEnabled = true" not in s:
+                  marker = "compileOptions {"
+                  if marker in s:
+                      s = s.replace(
+                          marker,
+                          marker + "\n        isCoreLibraryDesugaringEnabled = true",
+                          1
+                      )
+
+              if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in s:
+                  if "dependencies {" in s:
+                      s = s.replace(
+                          "dependencies {",
+                          'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                          1
+                      )
+                  else:
+                      s += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+
+          else:
+              if "isCoreLibraryDesugaringEnabled" not in s:
+                  marker = "compileOptions {"
+                  if marker in s:
+                      s = s.replace(
+                          marker,
+                          marker + "\n        coreLibraryDesugaringEnabled true",
+                          1
+                      )
+
+              if "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'" not in s:
+                  if "dependencies {" in s:
+                      s = s.replace(
+                          "dependencies {",
+                          "dependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'",
+                          1
+                      )
+                  else:
+                      s += "\n\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+
+          build_file.write_text(s)
+
+          print(f"Configured: {build_file}")
+          PY
+
+          echo "=== Verify desugaring ==="
+          grep -R "desugar_jdk_libs" android/app || true
+          grep -R "CoreLibraryDesugaringEnabled\|coreLibraryDesugaringEnabled" android/app || true
 
       - name: Get dependencies
         working-directory: project
         run: flutter pub get
+
+      - name: Verify Flutter dependencies
+        working-directory: project
+        shell: bash
+        run: |
+          echo "=== Notification dependencies ==="
+          grep -n "flutter_local_notifications:" pubspec.yaml
+          grep -n "timezone:" pubspec.yaml
+          grep -n "flutter_timezone:" pubspec.yaml
+
+          if grep -q "flutter_launcher_icons" pubspec.yaml; then
+            echo "ERROR: flutter_launcher_icons should not be used in this milestone."
+            exit 1
+          fi
+
+          echo "Launcher icon generation intentionally skipped."
 
       - name: Analyze BILANG source
         working-directory: project
@@ -98,4 +232,3 @@ jobs:
         with:
           name: bilang-debug-apk
           path: project/build/app/outputs/flutter-apk/app-debug.apk
-          
